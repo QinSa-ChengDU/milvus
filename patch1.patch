@@ -1,0 +1,319 @@
+diff --git a/Makefile b/Makefile
+index b93df0012..0f9ccbdf3 100644
+--- a/Makefile
++++ b/Makefile
+@@ -230,7 +230,7 @@ integration-test: getdeps
+ 	@echo "Building integration tests ..."
+ 	@(env bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
+ 
+-BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
++BUILD_TAGS = $(shell git describe --tags --always )
+ BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
+ BUILD_TIME = $(shell date -u)
+ GIT_COMMIT = $(shell git rev-parse --short HEAD)
+diff --git a/build/build-milvus.sh b/build/build-milvus.sh
+new file mode 100755
+index 000000000..d8eb06ffe
+--- /dev/null
++++ b/build/build-milvus.sh
+@@ -0,0 +1,151 @@
++#!/bin/bash
++set -e  # 出现错误时立即退出
++
++# 统一的 Milvus 多架构构建脚本
++# 用法: TARGETARCH=arm64 ./build.sh 或 TARGETARCH=amd64 ./build.sh
++
++# 1. 参数验证和初始化
++echo "=== Milvus 多架构构建脚本 ==="
++
++# 检查必需的环境变量
++if [ -z "$TARGETARCH" ]; then
++    echo "错误: 必须设置 TARGETARCH 环境变量 (arm64 或 amd64)"
++    echo "TARGETARCH=arm64 ./build-milvus.sh"
++    exit 1
++fi
++
++if [ "$TARGETARCH" != "arm64" ] && [ "$TARGETARCH" != "amd64" ]; then
++    echo "错误: TARGETARCH 必须是 'arm64' 或 'amd64'"
++    exit 1
++fi
++
++echo "构建架构: $TARGETARCH"
++
++# 2. 生成镜像标签
++generate_image_tag() {
++    local date=$(date +%Y%m%d)
++    local git_short_commit=$(git rev-parse --short HEAD)
++    local branch_name=$(git rev-parse --abbrev-ref HEAD)
++    local image_tag="${branch_name}-${date}-${git_short_commit}-${TARGETARCH}"
++    echo "$image_tag"
++}
++
++IMAGE_TAG=$(generate_image_tag)
++echo "生成的镜像标签: $IMAGE_TAG"
++
++# 3. 环境准备
++echo "=== 环境准备 ==="
++
++# 设置 Docker 镜像加速
++if [ -f "./build/set_docker_mirror.sh" ]; then
++    echo "设置 Docker 镜像加速..."
++    ./build/set_docker_mirror.sh
++else
++    echo "警告: set_docker_mirror.sh 不存在，跳过镜像加速设置"
++fi
++
++# 清理 Makefile 的 dirty 标记
++if [ -f "Makefile" ]; then
++    echo "清理 Makefile 的 dirty 标记..."
++    sed -i. 's/--dirty="-dev"//g' Makefile
++else
++    echo "错误: Makefile 不存在"
++    exit 1
++fi
++
++# 设置网络模式
++export IS_NETWORK_MODE_HOST="true"
++echo "设置网络模式: IS_NETWORK_MODE_HOST=true"
++
++# 4. 缓存管理
++#echo "=== 缓存管理 ==="
++#CACHE_DIR="/tmp/krte/cache"
++
++# 检查并创建缓存目录
++#mkdir -p "$CACHE_DIR"
++
++# 复用 Docker 缓存（如果存在）
++#if [ -d "$CACHE_DIR/.docker" ]; then
++#    echo "复用 Docker 缓存..."
++#    cp -r "$CACHE_DIR/.docker" .
++#else
++#    echo "无现有缓存，将创建新缓存"
++#fi
++
++# 5. 根据架构设置参数
++echo "=== 架构配置 ==="
++if [ "$TARGETARCH" = "arm64" ]; then
++    export PLATFORM_ARCH="arm64"
++    BUILD_ARGS="--build-arg TARGETARCH=arm64"
++    echo "配置为 ARM64 架构"
++else
++    export PLATFORM_ARCH="amd64" 
++    BUILD_ARGS=""
++    echo "配置为 AMD64 架构"
++fi
++
++# 6. 编译构建
++echo "=== 编译构建 ==="
++echo "执行编译命令..."
++
++# 检查 builder.sh 是否存在
++if [ ! -f "build/builder.sh" ]; then
++    echo "错误: build/builder.sh 不存在"
++    exit 1
++fi
++
++# 在 build/builder.sh 或 Makefile 中添加
++export CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
++export CARGO_REGISTRIES_CRATES_IO_INDEX=https://mirrors.ustc.edu.cn/crates.io-index/
++
++# 执行编译
++if [ "$TARGETARCH" = "arm64" ]; then
++    PLATFORM_ARCH="arm64" build/builder.sh /bin/bash -c "git config --global http.proxy http://192.168.1.202:8889 ; git config --global https.proxy http://192.168.1.202:8889;make clean;make install"
++else
++    build/builder.sh /bin/bash -c "make install"
++fi
++
++# 7. 镜像构建
++echo "=== Docker 镜像构建 ==="
++export MILVUS_IMAGE_TAG="$IMAGE_TAG"
++export DOCKER_BUILDKIT=1
++
++echo "构建镜像标签: $MILVUS_IMAGE_TAG"
++echo "构建参数: $BUILD_ARGS"
++
++# 执行镜像构建
++if [ -f "build/build_image.sh" ]; then
++    #$BUILD_ARGS build/build_image.sh
++     bash -x build/build_image.sh
++else
++    echo "错误: build/build_image.sh 不存在"
++    exit 1
++fi
++
++# 8. 更新缓存
++#echo "=== 更新缓存 ==="
++#if [ -d ".docker" ]; then
++#    echo "更新 Docker 缓存..."
++#    cp -r .docker "$CACHE_DIR/"
++#    echo "缓存已更新到: $CACHE_DIR/.docker"
++#else
++#    echo "警告: .docker 目录不存在，跳过缓存更新"
++#fi
++
++# 9. 验证构建结果
++echo "=== 构建验证 ==="
++if docker images | grep -q "$MILVUS_IMAGE_TAG"; then
++    echo "✅ 镜像构建成功: $MILVUS_IMAGE_TAG"
++    
++    # 显示镜像信息
++    echo "镜像信息:"
++    docker images | grep "$MILVUS_IMAGE_TAG"
++else
++    echo "❌ 镜像构建失败"
++    exit 1
++fi
++
++echo "=== 构建完成 ==="
++echo "镜像名称: milvusdb/milvus:$MILVUS_IMAGE_TAG"
++echo "架构: $TARGETARCH"
++echo "下一步: 使用 docker push 推送镜像到仓库"
+diff --git a/build/build_image.sh b/build/build_image.sh
+index b65e6bac6..853657bcf 100755
+--- a/build/build_image.sh
++++ b/build/build_image.sh
+@@ -20,6 +20,8 @@
+ set -e
+ # Print commands
+ set -x
++export http_proxy=http://192.168.1.202:8889
++export https_proxy=http://192.168.1.202:8889
+ 
+ # Absolute path to the toplevel milvus directory.
+ toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
+@@ -33,6 +35,7 @@ OS_NAME="${OS_NAME:-ubuntu20.04}"
+ MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
+ MILVUS_IMAGE_TAG="${MILVUS_IMAGE_TAG:-latest}"
+ 
++IMAGE_ARCH=""
+ if [ -z "$IMAGE_ARCH" ]; then
+     MACHINE=$(uname -m)
+     if [ "$MACHINE" = "x86_64" ]; then
+diff --git a/build/docker/builder/cpu/ubuntu22.04/Dockerfile b/build/docker/builder/cpu/ubuntu22.04/Dockerfile
+index dd6c57631..09f325483 100644
+--- a/build/docker/builder/cpu/ubuntu22.04/Dockerfile
++++ b/build/docker/builder/cpu/ubuntu22.04/Dockerfile
+@@ -32,6 +32,8 @@ RUN echo "target arch $TARGETARCH"
+ RUN wget -qO- "https://cmake.org/files/v3.31/cmake-3.31.8-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
+ 
+ # Install Go
++ARG HTTP_PROXY=http://192.168.1.202:8889
++ARG HTTPS_PROXY=http://192.168.1.202:8889
+ ENV GOPATH /go
+ ENV GOROOT /usr/local/go
+ ENV GO111MODULE on
+@@ -40,6 +42,12 @@ RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.24.6.linux-$TARGE
+     mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
+     go clean --modcache && \
+     chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
++ENV GIT_HTTP_PROXY=${HTTP_PROXY}
++ENV GIT_HTTPS_PROXY=${HTTPS_PROXY}
++
++# 或者在容器内配置git代理
++RUN git config --global http.proxy ${HTTP_PROXY} && \
++    git config --global https.proxy ${HTTPS_PROXY}
+ 
+ # refer: https://code.visualstudio.com/docs/remote/containers-advanced#_avoiding-extension-reinstalls-on-container-rebuild
+ RUN mkdir -p /home/milvus/.vscode-server/extensions \
+diff --git a/build/docker/milvus/ubuntu22.04/Dockerfile b/build/docker/milvus/ubuntu22.04/Dockerfile
+index 4e58e8eda..0e5ccd4d9 100644
+--- a/build/docker/milvus/ubuntu22.04/Dockerfile
++++ b/build/docker/milvus/ubuntu22.04/Dockerfile
+@@ -14,6 +14,9 @@ FROM ubuntu:jammy-20240530
+ ARG TARGETARCH
+ ARG MILVUS_ASAN_LIB
+ 
++ENV HTTP_PROXY=http://192.168.1.202:8889
++ENV HTTPS_PROXY=http://192.168.1.202:8889
++
+ # Install ca-certificates first, then switch to HTTPS and install other packages
+ RUN apt-get update && \
+     apt-get install -y --no-install-recommends ca-certificates && \
+@@ -26,6 +29,8 @@ RUN apt-get update && \
+ # Add Tini
+ RUN curl -L -o /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
+     chmod +x /tini
++ENV HTTP_PROXY=""
++ENV HTTPS_PROXY=""
+ 
+ RUN mkdir -p /milvus/bin
+ COPY --chown=root:root --chmod=774 ./bin/milvus /milvus/bin/milvus
+@@ -40,12 +45,12 @@ ENV LD_PRELOAD=${MILVUS_ASAN_LIB}:/milvus/lib/libjemalloc.so
+ ENV MALLOC_CONF=background_thread:true
+ 
+ # Change user to milvus
+-ENV ASAN_OPTIONS=detect_leaks=0
+-RUN groupadd -r milvus && useradd -r -g milvus milvus && \
+-    mkdir -p /var/lib/milvus && \
+-    chown -R milvus:milvus /milvus /var/lib/milvus
+-ENV ASAN_OPTIONS=detect_leaks=1
+-USER milvus:milvus
++#ENV ASAN_OPTIONS=detect_leaks=0
++#RUN groupadd -r milvus && useradd -r -g milvus milvus && \
++#    mkdir -p /var/lib/milvus && \
++#    chown -R milvus:milvus /milvus /var/lib/milvus
++#ENV ASAN_OPTIONS=detect_leaks=1
++#USER milvus:milvus
+ 
+ ENTRYPOINT ["/tini", "--"]
+ 
+diff --git a/deployments/docker/standalone/docker-compose.yml b/deployments/docker/standalone/docker-compose.yml
+index 3b7e04ebc..9f358dc2e 100644
+--- a/deployments/docker/standalone/docker-compose.yml
++++ b/deployments/docker/standalone/docker-compose.yml
+@@ -20,7 +20,7 @@ services:
+ 
+   minio:
+     container_name: milvus-minio
+-    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
++    image: minio/minio:latest
+     environment:
+       MINIO_ACCESS_KEY: minioadmin
+       MINIO_SECRET_KEY: minioadmin
+@@ -38,7 +38,7 @@ services:
+ 
+   standalone:
+     container_name: milvus-standalone
+-    image: milvusdb/milvus:v2.6.4
++    image: milvusdb/milvus:latest
+     command: ["milvus", "run", "standalone"]
+     security_opt:
+     - seccomp:unconfined
+diff --git a/docker-compose.yml b/docker-compose.yml
+index 21a7739b0..3c3269fc1 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -10,7 +10,9 @@ x-ccache: &ccache
+ services:
+   builder:
+     image: ${IMAGE_REPO}/milvus-env:${OS_NAME}-${DATE_VERSION}
+-    # Build devcontainer
++    network_mode: "host"
++    network_mode: "host"
++        # Build devcontainer
+     build:
+       context: .
+       dockerfile: build/docker/builder/cpu/${OS_NAME}/Dockerfile
+@@ -33,6 +35,9 @@ services:
+       AZURE_STORAGE_CONNECTION_STRING: ${AZURITE_CONNECTION_STRING}
+       ENABLE_GCP_NATIVE: ${ENABLE_GCP_NATIVE}
+       USE_ASAN: ${USE_ASAN}
++      GOPROXY: https://goproxy.cn,direct  # 添加这里
++      http_proxy: http://192.168.1.202:8889
++      https_proxy: http://192.168.1.202:8889
+     volumes: &builder-volumes
+       - .:/go/src/github.com/milvus-io/milvus:delegated
+       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated
+diff --git a/scripts/core_build.sh b/scripts/core_build.sh
+index f7b38793e..a74751f65 100755
+--- a/scripts/core_build.sh
++++ b/scripts/core_build.sh
+@@ -225,6 +225,7 @@ ${CMAKE_EXTRA_ARGS} \
+ -DMILVUS_CUDA_ARCH=${CUDA_ARCH} \
+ -DEMBEDDED_MILVUS=${EMBEDDED_MILVUS} \
+ -DBUILD_DISK_ANN=${BUILD_DISK_ANN} \
++-DMILVUS_JEMALLOC_LG_PAGE=16 \
+ -DUSE_ASAN=${USE_ASAN} \
+ -DUSE_DYNAMIC_SIMD=${USE_DYNAMIC_SIMD} \
+ -DCPU_ARCH=${CPU_ARCH} \
+
