@@ -21,7 +21,7 @@ if [ "$TARGETARCH" != "arm64" ] && [ "$TARGETARCH" != "amd64" ]; then
 fi
 
 # 设置代理环境变量
-BUILD_PROXY=${BUILD_PROXY:-http://192.168.1.202:8889}
+BUILD_PROXY=${BUILD_PROXY:-http://192.168.1.47:7890}
 echo "使用代理: $BUILD_PROXY"
 
 echo "构建架构: $TARGETARCH"
@@ -42,12 +42,12 @@ echo "生成的镜像标签: $IMAGE_TAG"
 echo "=== 环境准备 ==="
 
 # 设置 Docker 镜像加速
-if [ -f "./build/set_docker_mirror.sh" ]; then
-    echo "设置 Docker 镜像加速..."
-    ./build/set_docker_mirror.sh
-else
-    echo "警告: set_docker_mirror.sh 不存在，跳过镜像加速设置"
-fi
+# if [ -f "./build/set_docker_mirror.sh" ]; then
+#     echo "设置 Docker 镜像加速..."
+#     ./build/set_docker_mirror.sh
+# else
+#     echo "警告: set_docker_mirror.sh 不存在，跳过镜像加速设置"
+# fi
 
 # 清理 Makefile 的 dirty 标记
 if [ -f "Makefile" ]; then
@@ -58,9 +58,9 @@ else
     exit 1
 fi
 
-# 设置网络模式
-export IS_NETWORK_MODE_HOST="true"
-echo "设置网络模式: IS_NETWORK_MODE_HOST=true"
+# # 设置网络模式
+# export IS_NETWORK_MODE_HOST="true"
+# echo "设置网络模式: IS_NETWORK_MODE_HOST=true"
 
 # 4. 缓存管理
 #echo "=== 缓存管理 ==="

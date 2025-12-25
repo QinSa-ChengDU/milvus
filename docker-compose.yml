@@ -11,15 +11,13 @@ services:
   builder:
     image: ${IMAGE_REPO}/milvus-env:${OS_NAME}-${DATE_VERSION}
     network_mode: "host"
-    network_mode: "host"
-        # Build devcontainer
     build:
       context: .
       dockerfile: build/docker/builder/cpu/${OS_NAME}/Dockerfile
       args:
         TARGETARCH: ${IMAGE_ARCH}
-        HTTP_PROXY: ${BUILD_PROXY:-http://192.168.1.202:8889}
-        HTTPS_PROXY: ${BUILD_PROXY:-http://192.168.1.202:8889}
+        HTTP_PROXY: ${BUILD_PROXY:-http://192.168.1.47:7890}
+        HTTPS_PROXY: ${BUILD_PROXY:-http://192.168.1.47:7890}
       cache_from:
         - ${IMAGE_REPO}/milvus-env:${OS_NAME}-${LATEST_DATE_VERSION}
     platform: linux/${IMAGE_ARCH}
@@ -38,8 +36,8 @@ services:
       ENABLE_GCP_NATIVE: ${ENABLE_GCP_NATIVE}
       USE_ASAN: ${USE_ASAN}
       GOPROXY: https://goproxy.cn,direct  # 添加这里
-      http_proxy: ${BUILD_PROXY:-http://192.168.1.202:8889}
-      https_proxy: ${BUILD_PROXY:-http://192.168.1.202:8889}
+      http_proxy: ${BUILD_PROXY:-http://192.168.1.47:7890}
+      https_proxy: ${BUILD_PROXY:-http://192.168.1.47:7890}
     volumes: &builder-volumes
       - .:/go/src/github.com/milvus-io/milvus:delegated
       - ${DOCKER_VOLUME_DIRECTORY:-.docker}/${IMAGE_ARCH}-${OS_NAME}-ccache:/ccache:delegated

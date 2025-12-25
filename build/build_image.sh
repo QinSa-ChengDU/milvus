@@ -20,8 +20,8 @@
 set -e
 # Print commands
 set -x
-export http_proxy=${BUILD_PROXY:-http://192.168.1.202:8889}
-export https_proxy=${BUILD_PROXY:-http://192.168.1.202:8889}
+export http_proxy=${BUILD_PROXY:-http://192.168.1.47:7890}
+export https_proxy=${BUILD_PROXY:-http://192.168.1.47:7890}
 
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
